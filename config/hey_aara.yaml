@@ -1,0 +1,42 @@
+model_name: "hey_aara"
+
+target_phrase:
+  - "hey AARA"
+
+custom_negative_phrases: []
+
+n_samples: 20000
+n_samples_val: 4000
+tts_batch_size: 50
+augmentation_batch_size: 16
+piper_sample_generator_path: "./scripts/generate_samples_stub"
+
+output_dir: "./training_output"
+
+rir_paths:
+  - "./mit_rirs"
+
+background_paths:
+  - "./fma"
+background_paths_duplication_rate:
+  - 1
+
+false_positive_validation_data_path: "./data/negative/features/validation_set_features.npy"
+
+augmentation_rounds: 1
+
+feature_data_files:
+  "ACAV100M_sample": "./data/negative/features/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 300
+  "positive": 300
+  "real_voice": 30
+
+model_type: "dnn"
+layer_size: 32
+
+steps: 50000
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2

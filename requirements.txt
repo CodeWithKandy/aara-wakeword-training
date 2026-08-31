@@ -1,0 +1,40 @@
+# aara-wakeword-training — pinned to the versions this pipeline was trained and
+# tested with (Windows 11, Python 3.12, CUDA 13.0). Adjust torch/torchaudio for
+# your platform: https://pytorch.org/get-started/locally/
+#
+# openWakeWord and piper-sample-generator are installed FROM SOURCE (patched /
+# incomplete on PyPI) — see README "Setup". Do not `pip install openwakeword`.
+
+# --- critical pin ---
+# datasets >= 4 pulls in torchcodec, which has unresolved Windows/CUDA loading
+# failures. 3.6.0 is the last version that works with the soundfile I/O path.
+datasets==3.6.0
+
+# --- core runtime (listener + evaluation) ---
+numpy==2.4.4
+onnxruntime==1.28.0
+onnx==1.22.0
+sounddevice==0.5.5
+soundfile==0.14.0
+
+# --- training pipeline ---
+torch==2.13.0
+torchaudio==2.11.0
+torchinfo==1.8.0
+torchmetrics==1.9.0
+speechbrain==1.1.0
+audiomentations==0.33.0
+torch-audiomentations==0.12.0
+acoustics==0.2.6
+mutagen==1.48.1
+librosa==0.10.2.post1
+scipy==1.18.0
+scikit-learn==1.9.0
+pandas==3.0.5
+pyyaml==6.0.3
+tqdm==4.70.0
+
+# --- synthetic sample generation (Piper TTS) ---
+piper-tts==1.3.0
+# piper-sample-generator: install from source (see README) — the PyPI package
+# omits piper_train and the model .pt.json sidecars.

@@ -1,0 +1,130 @@
+diff --git a/openwakeword/data.py b/openwakeword/data.py
+index 7a95306..fbc1d21 100755
+--- a/openwakeword/data.py
++++ b/openwakeword/data.py
+@@ -35,6 +35,41 @@ import torchaudio
+ import mutagen
+ import acoustics
+ 
++# --- Patch: bypass torchcodec for audio I/O (Windows/cu130 compatibility) ---
++# torchaudio now requires torchcodec for load()/info(), which has documented,
++# unresolved loading failures on Windows with recent CUDA builds. soundfile
++# has already proven reliable throughout this project, so we route through
++# it instead and reconstruct torchaudio's expected return types.
++import soundfile as _sf
++from collections import namedtuple as _namedtuple
++
++_AudioMetaData = _namedtuple(
++    "AudioMetaData", ["sample_rate", "num_frames", "num_channels", "bits_per_sample", "encoding"]
++)
++
++
++def _patched_load(filepath, *args, **kwargs):
++    data, sr = _sf.read(str(filepath), dtype="float32", always_2d=True)
++    return torch.from_numpy(data.T), sr
++
++
++def _patched_info(filepath, *args, **kwargs):
++    try:
++        info = _sf.info(str(filepath))
++    except Exception as e:
++        raise RuntimeError(str(e))
++    return _AudioMetaData(
++        sample_rate=info.samplerate,
++        num_frames=info.frames,
++        num_channels=info.channels,
++        bits_per_sample=16,
++        encoding="PCM_S",
++    )
++
++
++torchaudio.load = _patched_load
++torchaudio.info = _patched_info
++# --- End patch ---
+ 
+ # Load audio clips and structure into clips of the same length
+ def stack_clips(audio_data, clip_size=16000*2):
+@@ -886,8 +921,17 @@ def trim_mmap(mmap_path):
+             mmap_file2.flush()
+ 
+     # Remove old mmaped file
++    # Windows holds a lock on memory-mapped files until the handle is released;
++    # explicitly drop the reference and force garbage collection before deleting.
++    del mmap_file1
++    import gc
++    gc.collect()
+     os.remove(mmap_path)
+ 
++    # Release the new memmap's handle too, before renaming it (same Windows constraint)
++    del mmap_file2
++    gc.collect()
++
+     # Rename new mmap file to match original
+     os.rename(output_file2, mmap_path)
+ 
+diff --git a/openwakeword/train.py b/openwakeword/train.py
+index 708cdb2..22d7e12 100755
+--- a/openwakeword/train.py
++++ b/openwakeword/train.py
+@@ -814,6 +814,17 @@ if __name__ == '__main__':
+                                             output_file=os.path.join(feature_save_dir, "negative_features_test.npy"),
+                                             device="gpu" if torch.cuda.is_available() else "cpu",
+                                             ncpu=n_cpus if not torch.cuda.is_available() else 1)
++            real_voice_train_output_dir = os.path.join(config["output_dir"], config["model_name"], "real_voice_train")
++            real_voice_clips_train = [str(i) for i in Path(real_voice_train_output_dir).glob("*.wav")]*30
++            real_voice_clips_train_generator = augment_clips(real_voice_clips_train, total_length=config["total_length"],
++                                                             batch_size=config["augmentation_batch_size"],
++                                                             background_clip_paths=background_paths,
++                                                             RIR_paths=rir_paths)
++            compute_features_from_generator(real_voice_clips_train_generator, n_total=len(os.listdir(real_voice_train_output_dir))*30,
++                                            clip_duration=config["total_length"],
++                                            output_file=os.path.join(feature_save_dir, "real_voice_features_train.npy"),
++                                            device="gpu" if torch.cuda.is_available() else "cpu",
++                                            ncpu=n_cpus if not torch.cuda.is_available() else 1)
+         else:
+             logging.warning("Openwakeword features already exist, skipping data augmentation and feature generation")
+ 
+@@ -838,8 +849,8 @@ if __name__ == '__main__':
+         # Create label transforms as needed for model (currently only supports binary classification models)
+         data_transforms = {key: f for key in config["feature_data_files"].keys()}
+         label_transforms = {}
+-        for key in ["positive"] + list(config["feature_data_files"].keys()) + ["adversarial_negative"]:
+-            if key == "positive":
++        for key in ["positive"] + list(config["feature_data_files"].keys()) + ["adversarial_negative"] + ["real_voice"]:
++            if key in ("positive", "real_voice"):
+                 label_transforms[key] = lambda x: [1 for i in x]
+             else:
+                 label_transforms[key] = lambda x: [0 for i in x]
+@@ -847,6 +858,7 @@ if __name__ == '__main__':
+         # Add generated positive and adversarial negative clips to the feature data files dictionary
+         config["feature_data_files"]['positive'] = os.path.join(feature_save_dir, "positive_features_train.npy")
+         config["feature_data_files"]['adversarial_negative'] = os.path.join(feature_save_dir, "negative_features_train.npy")
++        config["feature_data_files"]['real_voice'] = os.path.join(feature_save_dir, "real_voice_features_train.npy")
+ 
+         # Make PyTorch data loaders for training and validation data
+         batch_generator = mmap_batch_generator(
+@@ -869,7 +881,7 @@ if __name__ == '__main__':
+         else:
+             n_cpus = n_cpus//2
+         X_train = torch.utils.data.DataLoader(IterDataset(batch_generator),
+-                                              batch_size=None, num_workers=n_cpus, prefetch_factor=16)
++                                              batch_size=None, num_workers=0)
+ 
+         X_val_fp = np.load(config["false_positive_validation_data_path"])
+         X_val_fp = np.array([X_val_fp[i:i+input_shape[0]] for i in range(0, X_val_fp.shape[0]-input_shape[0], 1)])  # reshape to match model
+diff --git a/openwakeword/utils.py b/openwakeword/utils.py
+index 5f64e03..3d334e5 100644
+--- a/openwakeword/utils.py
++++ b/openwakeword/utils.py
+@@ -597,6 +597,11 @@ def compute_features_from_generator(generator, n_total, clip_duration, output_fi
+         row_counter += features.shape[0]
+         fp.flush()
+ 
++    # Release the memmap handle before trim_mmap deletes/replaces the file (Windows compatibility)
++    del fp
++    import gc
++    gc.collect()
++
+     # Trip empty rows from the mmapped array
+     trim_mmap(output_file)
+ 

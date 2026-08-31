@@ -1,0 +1,9 @@
+# Normalize text to LF in the repo
+* text=auto eol=lf
+
+# Binary model artifacts — never touch
+*.onnx      binary
+*.onnx.data binary
+
+# Keep the patch as LF on every platform so `git apply` always works
+patches/openwakeword.patch text eol=lf

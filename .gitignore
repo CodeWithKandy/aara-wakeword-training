@@ -1,0 +1,43 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+
+# --- Third-party sources (cloned locally + patched, see patches/) ---
+openwakeword-src/
+piper-sample-generator-src/
+piper_train/
+
+# --- Downloaded models / assets ---
+# openWakeWord auto-downloads its base models on first use:
+**/openwakeword/resources/models/
+# Piper TTS voice used for sample generation (~200 MB):
+models/
+*.pt
+
+# --- Generated & downloaded training data ---
+data/                  # ACAV100M features, validation features, generated clips
+training_output/        # generated clips + .npy feature arrays + local model copy
+mit_rirs/               # downloaded MIT room impulse responses
+fma/                    # extracted FMA background-music clips
+fma_small.zip           # raw FMA archive (~7.6 GB)
+my_voice_samples/       # personal voice recordings (record your own, see README)
+test_samples/
+*.npy                   # precomputed feature arrays
+live_session_capture.wav
+*.log
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
